@@ -42,7 +42,6 @@ def get_successors(node):
             new_state[im] = new_state[index]
             new_state[index] = temp
             successor = Node(new_state, node, node.g+1)
-            print(successor.g)
             successors.append(successor)            
     return successors
 

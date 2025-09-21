@@ -1,5 +1,4 @@
 import heapq
-import numpy as np
 import random
 
 class Node:
@@ -9,16 +8,15 @@ class Node:
         self.g = g
         self.h = h
         self.f = g + h
-    def __lt__(self, other):
-        return self.g < other.g
+    def __lt__(self, other):    
+        return self.f < other.f
 
 def heuristic(node, goal_state):
-    h = 0
+    # Example heuristic: number of misplaced tiles
+    h = sum(1 for i, val in enumerate(node.state) if val != 0 and val != goal_state[i])
     return h
-
 def get_successors(node):
     successors = []
-    value = 0
     index = node.state.index(0)
     quotient = index//3
     remainder = index%3
@@ -42,7 +40,6 @@ def get_successors(node):
             new_state[im] = new_state[index]
             new_state[index] = temp
             successor = Node(new_state, node, node.g+1)
-            print(successor.g)
             successors.append(successor)            
     return successors
 
