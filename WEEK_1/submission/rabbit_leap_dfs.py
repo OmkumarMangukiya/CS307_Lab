@@ -11,12 +11,12 @@ def find_valid_jumps(board):
     """Determine all valid jumps for the current board state."""
     valid_jumps = []
     for i, rabbit in enumerate(board):
-        if rabbit == 1:  # Rightward-facing rabbit
+        if rabbit == 1:  
             if i + 1 < len(board) and board[i + 1] == -1:
                 valid_jumps.append((i, i + 1))
             if i + 2 < len(board) and board[i + 1] == 0 and board[i + 2] == -1:
                 valid_jumps.append((i, i + 2))
-        elif rabbit == 0:  # Leftward-facing rabbit
+        elif rabbit == 0:
             if i - 1 >= 0 and board[i - 1] == -1:
                 valid_jumps.append((i, i - 1))
             if i - 2 >= 0 and board[i - 1] == 1 and board[i - 2] == -1:

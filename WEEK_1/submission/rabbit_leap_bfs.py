@@ -12,12 +12,12 @@ def generate_moves(config):
     """Generate all possible moves from the current configuration."""
     possible_moves = []
     for i, rabbit in enumerate(config):
-        if rabbit == 1:  # Eastbound rabbit
+        if rabbit == 1:  
             if i + 1 < len(config) and config[i + 1] == 2:
                 possible_moves.append((i, i + 1))
             if i + 2 < len(config) and config[i + 1] == 0 and config[i + 2] == 2:
                 possible_moves.append((i, i + 2))
-        elif rabbit == 0:  # Westbound rabbit
+        elif rabbit == 0:
             if i - 1 >= 0 and config[i - 1] == 2:
                 possible_moves.append((i, i - 1))
             if i - 2 >= 0 and config[i - 1] == 1 and config[i - 2] == 2:
@@ -54,7 +54,6 @@ def solve_puzzle(start_config):
 
     return None
 
-# Initial configuration: 1, 1, 1 (Eastbound), 2 (Empty), 0, 0, 0 (Westbound)
 start_config = [1, 1, 1, 2, 0, 0, 0]
 solution = solve_puzzle(start_config)
 
