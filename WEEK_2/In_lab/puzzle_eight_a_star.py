@@ -12,7 +12,6 @@ class Node:
         return self.f < other.f
 
 def heuristic(node, goal_state):
-    # Example heuristic: number of misplaced tiles
     h = sum(1 for i, val in enumerate(node.state) if val != 0 and val != goal_state[i])
     return h
 def get_successors(node):
