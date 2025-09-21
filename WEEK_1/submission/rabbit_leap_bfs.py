@@ -1,66 +1,76 @@
 from collections import deque
 
-def display_configuration(config):
-    """Display the current configuration of the puzzle."""
-    return ' '.join('E' if x == 1 else 'W' if x == 0 else '_' for x in config)
+def is_valid(state):
+    empty = list(state).index(-1)
+    if(state==(1,1,1,-1,0,0,0)):
+        return True
+    if(empty == 0 and state[empty+1]==0  and state[empty+2] == 0):
+        return False
+    if(empty == 6 and state[empty-1]==1 and state[empty-2] == 1):
+        return False 
+    if(empty == 1 and state[empty-1]==1 and state[empty+1]==0 and state[empty+2]==0):
+        return False
+    if(empty == 5 and state[empty+1]==0 and state[empty-1]==1 and state[empty-2]==1):
+        return False
+    if(state[empty-1]==1 and state[empty-2]==1 and state[empty+1]==0 and state[empty+2]==0):
+        return False    
+    return True
 
-def is_solved(config):
-    """Check if the puzzle is solved."""
-    return config == [0, 0, 0, 2, 1, 1, 1]
+def swap(state, i, j):
+    new_state = list(state)
+    temp = new_state[i]
+    new_state[i] = new_state[j]
+    new_state[j] = temp
+    return tuple(new_state)
 
-def generate_moves(config):
-    """Generate all possible moves from the current configuration."""
-    possible_moves = []
-    for i, rabbit in enumerate(config):
-        if rabbit == 1:  
-            if i + 1 < len(config) and config[i + 1] == 2:
-                possible_moves.append((i, i + 1))
-            if i + 2 < len(config) and config[i + 1] == 0 and config[i + 2] == 2:
-                possible_moves.append((i, i + 2))
-        elif rabbit == 0:
-            if i - 1 >= 0 and config[i - 1] == 2:
-                possible_moves.append((i, i - 1))
-            if i - 2 >= 0 and config[i - 1] == 1 and config[i - 2] == 2:
-                possible_moves.append((i, i - 2))
-    return possible_moves
+def get_successors(state):
+    successors = []
+    empty = list(state).index(-1)
+    moves = [-2,-1,1,2]
+    for move in moves:
+        if(empty + move >= 0 and empty + move < 7):
+            if(move>0 and list(state)[move+empty]==1):
+                new_state = swap(state, empty, empty + move)
+                if is_valid(new_state):
+                    successors.append(new_state)
+            if(move<0 and list(state)[move+empty]==0):
+                new_state = swap(state, empty, empty + move)
+                if(state==(1,1,1,0,-1,0,0)):
+                    print(new_state)
+                if is_valid(new_state):
+                    successors.append(new_state)
+    return successors
 
-def apply_move(config, move):
-    """Apply a move to the configuration."""
-    new_config = config[:]
-    new_config[move[1]] = new_config[move[0]]
-    new_config[move[0]] = 2
-    return new_config
-
-def solve_puzzle(start_config):
-    """Solve the Rabbit Hop puzzle using breadth-first search."""
-    queue = deque([(start_config, [])])
-    seen = set()
-
+def bfs(start_state, goal_state):
+    queue = deque([(start_state, [])])
+    visited = set()
+    count=0
+    max_size=0
     while queue:
-        current_config, history = queue.popleft()
-
-        if tuple(current_config) in seen:
+        size=len(queue)
+        max_size=max(size,max_size)
+        (state, path) = queue.popleft()
+        if state in visited:
             continue
-
-        seen.add(tuple(current_config))
-        history = history + [current_config]
-
-        if is_solved(current_config):
-            return history
-
-        for move in generate_moves(current_config):
-            next_config = apply_move(current_config, move)
-            queue.append((next_config, history))
-
+        visited.add(state)
+        path = path + [state]
+        count+=1
+        if state == goal_state:
+            print(f"Total Number Of Nodes Visited: {count}")
+            print(f"Max Size Of queue at a point was: {max_size}")
+            return path
+        for successor in get_successors(state):
+            queue.append((successor, path))
     return None
 
-start_config = [1, 1, 1, 2, 0, 0, 0]
-solution = solve_puzzle(start_config)
+start_state = (0,0,0,-1,1,1,1)
+goal_state = (1,1,1,-1,0, 0, 0)
 
+solution = bfs(start_state, goal_state)
 if solution:
     print("Solution found:")
-    for step, config in enumerate(solution):
-        print(f"Step {step}: {display_configuration(config)}")
-    print(f"Total moves: {len(solution) - 1}")
+    print(f"Number Of nodes in solution: {len(solution)}")
+    for step in solution:
+        print(step)
 else:
-    print("No solution exists.")
+    print("No solution found.")
