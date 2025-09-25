@@ -39,14 +39,14 @@ def get_successors(state):
                     successors.append(new_state)
     return successors
 
-def bfs(start_state, goal_state):
-    queue = deque([(start_state, [])])
+def dfs(start_state, goal_state):
+    stack = deque([(start_state, [])])
     visited = set()
     count=0
     max_size=0
-    while queue:
-        max_size=max(max_size,len(queue))
-        (state, path) = queue.pop()
+    while stack:
+        max_size=max(max_size,len(stack))
+        (state, path) = stack.pop()
         if state in visited:
             continue
         visited.add(state)
@@ -54,16 +54,16 @@ def bfs(start_state, goal_state):
         count+=1
         if state == goal_state:
             print(f"Total Number Of Nodes Visited: {count}")
-            print(f"Max Size Of queue at a point was: {max_size}")
+            print(f"Max Size Of stack at a point was: {max_size}")
             return path
         for successor in get_successors(state):
-            queue.append((successor, path))
+            stack.append((successor, path))
     return None
 
 start_state = (0,0,0,-1,1,1,1)
 goal_state = (1,1,1,-1,0, 0, 0)
 
-solution = bfs(start_state, goal_state)
+solution = dfs(start_state, goal_state)
 if solution:
     print("Solution found:")
     print(f"Number of Nodes in solution is: {len(solution)}")

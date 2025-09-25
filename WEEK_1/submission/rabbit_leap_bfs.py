@@ -35,8 +35,6 @@ def get_successors(state):
                     successors.append(new_state)
             if(move<0 and list(state)[move+empty]==0):
                 new_state = swap(state, empty, empty + move)
-                if(state==(1,1,1,0,-1,0,0)):
-                    print(new_state)
                 if is_valid(new_state):
                     successors.append(new_state)
     return successors
