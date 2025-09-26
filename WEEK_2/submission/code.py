@@ -10,10 +10,10 @@ class AStarPlagiarismDetector:
 
     def _download_nltk_punkt(self):
         try:
-            nltk.data.find('tokenizers/punkt_tab')
+            nltk.data.find('tokenizers/punkt')
         except LookupError:
-            print("NLTK 'punkt_tab' tokenizer not found. Downloading...")
-            nltk.download('punkt_tab')
+            print("NLTK 'punkt' tokenizer not found. Downloading...")
+            nltk.download('punkt')
             print("Download complete.")
 
     def preprocess(self, text):
@@ -44,30 +44,11 @@ class AStarPlagiarismDetector:
 
         return previous_row[-1]
 
-    def get_successors(self, state, doc1_sents, doc2_sents):
-        """Get possible successor states for A* search"""
-        i, j = state
-        successors = []
-        
-        # Alignment move
-        if i < len(doc1_sents) and j < len(doc2_sents):
-            cost = self.edit_distance(doc1_sents[i], doc2_sents[j])
-            successors.append(((i + 1, j + 1), 'align', i, j, cost))
-        
-        # Skip document 1 sentence
-        if i < len(doc1_sents):
-            cost = len(doc1_sents[i])
-            successors.append(((i + 1, j), 'skip_doc1', i, -1, cost))
-        
-        # Skip document 2 sentence  
-        if j < len(doc2_sents):
-            cost = len(doc2_sents[j])
-            successors.append(((i, j + 1), 'skip_doc2', -1, j, cost))
-        
-        return successors
-
     def distance_heuristic(self, state, goal_state):
-        """Calculate heuristic distance to goal state"""
+        """
+        Calculate heuristic distance to goal state using Manhattan distance.
+        This estimates the minimum number of skip operations needed.
+        """
         i, j = state
         goal_i, goal_j = goal_state
         return abs(goal_i - i) + abs(goal_j - j)
@@ -79,6 +60,7 @@ class AStarPlagiarismDetector:
         doc1_lens = [len(s) for s in doc1_sents]
         doc2_lens = [len(s) for s in doc2_sents]
 
+        # The priority queue now stores (f_cost, g_cost, state, path)
         open_list = [(0, 0, start_state, [])]
         visited_states = {}
 
@@ -94,33 +76,49 @@ class AStarPlagiarismDetector:
 
             i, j = current_state
 
+            # Successor 1: Align sentences
             if i < len(doc1_sents) and j < len(doc2_sents):
                 cost = self.edit_distance(doc1_sents[i], doc2_sents[j])
                 new_g = g_cost + cost
-                h = 0
+                successor_state = (i + 1, j + 1)
+                
+                # --- HEURISTIC CALCULATION ---
+                h = self.distance_heuristic(successor_state, goal_state)
                 new_f = new_g + h
+                
                 new_path = path + [('align', i, j, cost)]
-                heapq.heappush(open_list, (new_f, new_g, (i + 1, j + 1), new_path))
+                heapq.heappush(open_list, (new_f, new_g, successor_state, new_path))
 
+            # Successor 2: Skip sentence in document 1
             if i < len(doc1_sents):
                 cost = doc1_lens[i]
                 new_g = g_cost + cost
-                h = 0
-                new_f = new_g + h
-                new_path = path + [('skip_doc1', i, -1, cost)]
-                heapq.heappush(open_list, (new_f, new_g, (i + 1, j), new_path))
+                successor_state = (i + 1, j)
 
+                # --- HEURISTIC CALCULATION ---
+                h = self.distance_heuristic(successor_state, goal_state)
+                new_f = new_g + h
+                
+                new_path = path + [('skip_doc1', i, -1, cost)]
+                heapq.heappush(open_list, (new_f, new_g, successor_state, new_path))
+
+            # Successor 3: Skip sentence in document 2
             if j < len(doc2_sents):
                 cost = doc2_lens[j]
                 new_g = g_cost + cost
-                h = 0
+                successor_state = (i, j + 1)
+                
+                # --- HEURISTIC CALCULATION ---
+                h = self.distance_heuristic(successor_state, goal_state)
                 new_f = new_g + h
+                
                 new_path = path + [('skip_doc2', -1, j, cost)]
-                heapq.heappush(open_list, (new_f, new_g, (i, j + 1), new_path))
+                heapq.heappush(open_list, (new_f, new_g, successor_state, new_path))
 
         return [], float('inf')
 
     def report_results(self, path, doc1_sents, doc2_sents, total_cost):
+        # This function remains the same
         print("\n--- Plagiarism Detection Report ---")
         print(f"Optimal Alignment Cost (Total Edit Distance): {total_cost}")
         plagiarised_count = 0
@@ -155,6 +153,7 @@ class AStarPlagiarismDetector:
             print(f"No sentence pairs met the {self.threshold:.0%} similarity threshold for plagiarism.")
 
     def detect(self, doc1_text, doc2_text):
+        # This function remains the same
         print(f"Document 1: \"{doc1_text}\"")
         print(f"Document 2: \"{doc2_text}\"\n")
         
@@ -173,6 +172,7 @@ class AStarPlagiarismDetector:
 
 
 if __name__ == '__main__':
+    # This part remains the same
     if len(sys.argv) != 3:
         print("Usage: python plagiarism_detector.py <file1.txt> <file2.txt>")
         sys.exit(1)
@@ -197,4 +197,3 @@ if __name__ == '__main__':
     print("=" * 60)
     
     detector.detect(doc1_text, doc2_text)
-
