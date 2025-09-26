@@ -56,7 +56,6 @@ def simulated_annealing(distance_matrix, max_iter=100000, temp_start=1000):
     best_cost = current_cost
 
     for iteration in range(1, max_iter + 1):
-        # Create new tour using 2-opt swap
         i, j = sorted(random.sample(range(N), 2))
         new_tour = (
             current_tour[:i] + current_tour[i : j + 1][::-1] + current_tour[j + 1 :]
@@ -78,15 +77,12 @@ def simulated_annealing(distance_matrix, max_iter=100000, temp_start=1000):
 
     return best_tour, best_cost
 
-
-# Solve TSP using Simulated Annealing
 print("Solving TSP for Rajasthan cities...")
 best_tour, best_cost = simulated_annealing(D)
 
 print(f"Best tour cost: {best_cost:.2f}")
 print(f"Tour: {' -> '.join([cities[i] for i in best_tour])}")
 
-# Visualize the best tour
 plt.figure(figsize=(10, 8))
 tour_coords = np.array(
     [locations[cities[i]] for i in best_tour] + [locations[cities[best_tour[0]]]]
@@ -95,7 +91,6 @@ tour_coords = np.array(
 plt.plot(tour_coords[:, 1], tour_coords[:, 0], "o-", linewidth=2, markersize=8, 
          color='red', label=f"Best Tour (Cost: {best_cost:.2f})")
 
-# Add city labels
 for i, city_idx in enumerate(best_tour):
     city_name = cities[city_idx]
     plt.text(tour_coords[i, 1], tour_coords[i, 0], city_name, fontsize=9, 

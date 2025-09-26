@@ -6,7 +6,7 @@ import copy
 from tqdm import tqdm
 
 from collections import deque
-import time  # For tracking time
+import time
 import psutil
 
 
@@ -21,7 +21,6 @@ def load_octave_column_matrix(file_path):
     with open(file_path, "r") as f:
         lines = f.readlines()
 
-    # Skip the header (first 5 lines)
     matrix_lines = lines[5:]
 
     for line in matrix_lines:
@@ -41,13 +40,10 @@ def load_octave_column_matrix(file_path):
     return reshaped_matrix
 
 
-# Calculate the difference between edges with improved scoring
 def edge_difference(edge1, edge2):
-    # Normalized mean absolute error for better edge matching
     diff = np.abs(edge1.astype(float) - edge2.astype(float))
     return np.mean(diff)
 
-# Enhanced edge compatibility scoring
 def calculate_edge_compatibility(piece1, piece2, direction):
     """Calculate compatibility score between two pieces in given direction"""
     if direction == 'up':
@@ -63,18 +59,14 @@ def calculate_edge_compatibility(piece1, piece2, direction):
         edge1 = piece1[:, -1]
         edge2 = piece2[:, 0]
     
-    # Base edge difference
     base_diff = edge_difference(edge1, edge2)
     
-    # Add corner matching bonus
     corner_bonus = 0
     if direction in ['up', 'down']:
-        # Check corner alignment for horizontal edges
         corner_diff1 = abs(float(edge1[0]) - float(edge2[0]))
         corner_diff2 = abs(float(edge1[-1]) - float(edge2[-1]))
         corner_bonus = (corner_diff1 + corner_diff2) * 0.5
     else:
-        # Check corner alignment for vertical edges
         corner_diff1 = abs(float(edge1[0]) - float(edge2[0]))
         corner_diff2 = abs(float(edge1[-1]) - float(edge2[-1]))
         corner_bonus = (corner_diff1 + corner_diff2) * 0.5
@@ -82,7 +74,6 @@ def calculate_edge_compatibility(piece1, piece2, direction):
     return base_diff + corner_bonus * 0.3
 
 
-# Calculate the value (total edge differences) of the current arrangement
 def get_value(grid, pieces):
     total_difference = 0
     rows, cols = len(grid), len(grid[0])
@@ -102,18 +93,13 @@ def get_value(grid, pieces):
     return total_difference
 
 
-# Generate a neighbor by swapping two pieces with improved strategy
 def generate_neighbor(grid):
     new_grid = copy.deepcopy(grid)
     rows, cols = len(grid), len(grid[0])
     
-    # 80% of the time do local swaps (adjacent or nearby pieces)
-    # 20% of the time do random swaps
     if random.random() < 0.8:
-        # Local swap: choose a piece and swap with a nearby piece
         i1, j1 = random.randint(0, rows-1), random.randint(0, cols-1)
         
-        # Find nearby positions
         nearby_positions = []
         for di in [-1, 0, 1]:
             for dj in [-1, 0, 1]:
@@ -126,7 +112,6 @@ def generate_neighbor(grid):
         else:
             i2, j2 = random.randint(0, rows-1), random.randint(0, cols-1)
     else:
-        # Random swap
         i1, j1 = random.randint(0, rows-1), random.randint(0, cols-1)
         i2, j2 = random.randint(0, rows-1), random.randint(0, cols-1)
     
@@ -140,21 +125,18 @@ def greedy_initial_placement(pieces):
     grid = [[-1 for _ in range(cols)] for _ in range(rows)]
     used_pieces = set()
     
-    # Start with a random corner piece
     corner_piece = random.randint(0, len(pieces) - 1)
     grid[0][0] = corner_piece
     used_pieces.add(corner_piece)
     
-    # Fill the grid row by row using best edge matches
     for i in range(rows):
         for j in range(cols):
-            if grid[i][j] != -1:  # Already filled
+            if grid[i][j] != -1:
                 continue
                 
             best_piece = -1
             best_score = float('inf')
             
-            # Try each unused piece
             for piece_idx in range(len(pieces)):
                 if piece_idx in used_pieces:
                     continue
@@ -162,22 +144,20 @@ def greedy_initial_placement(pieces):
                 total_score = 0
                 valid_neighbors = 0
                 
-                # Check compatibility with placed neighbors
-                if i > 0 and grid[i-1][j] != -1:  # Top neighbor
+                if i > 0 and grid[i-1][j] != -1:
                     score = calculate_edge_compatibility(pieces[piece_idx], pieces[grid[i-1][j]], 'up')
                     total_score += score
                     valid_neighbors += 1
                     
-                if j > 0 and grid[i][j-1] != -1:  # Left neighbor
+                if j > 0 and grid[i][j-1] != -1:
                     score = calculate_edge_compatibility(pieces[piece_idx], pieces[grid[i][j-1]], 'left')
                     total_score += score
                     valid_neighbors += 1
                 
-                # Average score for valid neighbors (or 0 if no neighbors)
                 if valid_neighbors > 0:
                     avg_score = total_score / valid_neighbors
                 else:
-                    avg_score = 0  # For pieces with no placed neighbors yet
+                    avg_score = 0
                 
                 if avg_score < best_score:
                     best_score = avg_score
@@ -189,8 +169,6 @@ def greedy_initial_placement(pieces):
     
     return grid
 
-
-# Enhanced simulated annealing algorithm with better parameters
 def simulated_annealing(pieces, initial_grid, max_iterations=20000, initial_temp=2000, cooling_rate=0.9995):
     current_grid = copy.deepcopy(initial_grid)
     current_value = get_value(current_grid, pieces)
@@ -206,7 +184,6 @@ def simulated_annealing(pieces, initial_grid, max_iterations=20000, initial_temp
         neighbor_value = get_value(neighbor_grid, pieces)
         delta = neighbor_value - current_value
 
-        # Accept better solutions or probabilistically accept worse ones
         acceptance_prob = math.exp(-delta / max(temperature, 1e-10)) if delta > 0 else 1.0
         
         if delta < 0 or random.uniform(0, 1) < acceptance_prob:
@@ -220,8 +197,6 @@ def simulated_annealing(pieces, initial_grid, max_iterations=20000, initial_temp
                 last_improvement = iteration
 
         temperature *= cooling_rate
-        
-        # Early stopping if no improvement for a long time
         if iteration - last_improvement > max_iterations // 4:
             print(f"\nEarly stopping at iteration {iteration} (no improvement for {iteration - last_improvement} iterations)")
             break
@@ -239,17 +214,13 @@ def multiple_runs_optimization(pieces, num_runs=3):
     
     for run in range(num_runs):
         print(f"\n--- Run {run + 1}/{num_runs} ---")
-        
-        # Create different initial configurations
         if run == 0:
             print("Using greedy initial placement...")
             initial_grid = greedy_initial_placement(pieces)
         elif run == 1:
-            # Sequential arrangement
             print("Using sequential initial placement...")
             initial_grid = [[i*4 + j for j in range(4)] for i in range(4)]
         else:
-            # Random arrangement
             print("Using random initial placement...")
             pieces_indices = list(range(16))
             random.shuffle(pieces_indices)
@@ -291,12 +262,10 @@ def reconstruct_image(pieces, grid):
     return reconstructed
 
 
-# Load the pieces from the file
 print("Loading jigsaw puzzle...")
 pieces = []
 matrix = load_octave_column_matrix("jigsaw.mat")
 
-# For a 512x512 image, we'll create a 4x4 grid of 128x128 pieces
 piece_size = 128
 num_pieces_per_side = 4
 rows, cols = 4, 4
@@ -308,23 +277,19 @@ for i in range(num_pieces_per_side):
 
 print(f"Created {len(pieces)} puzzle pieces of size {piece_size}x{piece_size}")
 
-# Set random seed for reproducibility
 random.seed(42)
 np.random.seed(42)
 
-# Use the enhanced optimization
 start_time = time.time()
 final_grid, final_value = multiple_runs_optimization(pieces, num_runs=3)
 total_time = time.time() - start_time
 
 print(f"\nOptimization completed in {total_time:.2f} seconds")
 
-# Compare with original arrangement
 original_grid = [[i*cols + j for j in range(cols)] for i in range(rows)]
 original_image = reconstruct_image(pieces, original_grid)
 result_image = reconstruct_image(pieces, final_grid)
 
-# Calculate improvement metrics
 original_score = get_value(original_grid, pieces)
 improvement = original_score - final_value
 improvement_percentage = (improvement / original_score) * 100
@@ -334,7 +299,6 @@ print(f"Original score: {original_score:.2f}")
 print(f"Final score: {final_value:.2f}")
 print(f"Improvement: {improvement:.2f} ({improvement_percentage:.1f}%)")
 
-# Enhanced visualization
 plt.figure(figsize=(15, 7))
 
 plt.subplot(1, 3, 1)
@@ -348,7 +312,6 @@ plt.imshow(result_image, cmap='gray')
 plt.axis('off')
 
 plt.subplot(1, 3, 3)
-# Show the difference
 difference = np.abs(original_image.astype(float) - result_image.astype(float))
 plt.title(f"Difference\n(Improvement: {improvement_percentage:.1f}%)", fontsize=12)
 plt.imshow(difference, cmap='hot')
