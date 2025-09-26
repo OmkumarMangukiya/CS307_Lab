@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import cv2
 import random
 import math
 import copy
@@ -12,6 +11,11 @@ import psutil
 
 
 def load_octave_column_matrix(file_path):
+    """
+    Load an octave-style column matrix stored in a text-like file where the first 5 lines are header
+    and the following lines contain one integer per line (512*512 lines expected).
+    Returns a (512, 512) numpy array.
+    """
     matrix = []
 
     with open(file_path, "r") as f:
@@ -20,318 +24,338 @@ def load_octave_column_matrix(file_path):
     # Skip the header (first 5 lines)
     matrix_lines = lines[5:]
 
-    # Process the matrix data, skipping any empty or non-numeric lines
     for line in matrix_lines:
         line = line.strip()
-        if line:  # Check if the line is not empty
+        if line:
             try:
-                matrix.append(int(line))  # Convert to integer and append
+                matrix.append(int(line))
             except ValueError:
-                print(f"Skipping invalid line: {line}")  # Handle invalid lines
+                print(f"Skipping invalid line: {line}")
 
-    # Convert the list to a NumPy array and reshape it into 512x512
-    matrix = np.array(matrix)
+    matrix = np.array(matrix, dtype=np.int32)
 
-    # Check if the total data length is correct (512*512 = 262144)
     if matrix.size != 512 * 512:
         raise ValueError(f"Expected 262144 elements, but got {matrix.size} elements.")
 
-    reshaped_matrix = matrix.reshape((512, 512))  # Reshape into 512x512 matrix
-
+    reshaped_matrix = matrix.reshape((512, 512))
     return reshaped_matrix
 
 
-def create_patch(image):
-    patch_size = 128
+# Calculate the difference between edges with improved scoring
+def edge_difference(edge1, edge2):
+    # Normalized mean absolute error for better edge matching
+    diff = np.abs(edge1.astype(float) - edge2.astype(float))
+    return np.mean(diff)
 
-    # Number of patches along each dimension
-    num_patches = image.shape[0] // patch_size
-
-    # List to store patches
-    patches = {}
-    state_mat = []
-    z = 0
-    # Loop to extract 128x128 patches
-    for i in range(num_patches):
-        temp = []
-        for j in range(num_patches):
-            temp.append(z)
-
-            # Extract patch using array slicing
-            patch = image[
-                i * patch_size : (i + 1) * patch_size,
-                j * patch_size : (j + 1) * patch_size,
-            ]
-            patches[z] = patch
-            z = z + 1
-
-        state_mat.append(temp)
-
-    # 'patches' will contain 16 patches of size 128x128
-
-    return patches, state_mat
-
-
-def reconstruct_image(patches, grid):
-    """
-    Reconstructs a full image from patches using a grid.
-
-    :param patches: List of image patches as NumPy arrays.
-    :param grid: 2D list where each element is an index pointing to a patch in `patches`.
-    :return: Reconstructed image.
-    """
-    patch_height, patch_width = patches[0].shape[:2]
-    grid_height = len(grid)
-    grid_width = len(grid[0])
-
-    # Initialize an empty array for the full image
-    full_image = np.zeros(
-        (grid_height * patch_height, grid_width * patch_width), dtype=np.uint8
-    )
-
-    for i, row in enumerate(grid):
-        for j, patch_index in enumerate(row):
-            # Place each patch in its corresponding position in the full image
-            full_image[
-                i * patch_height : (i + 1) * patch_height,
-                j * patch_width : (j + 1) * patch_width,
-            ] = patches[patch_index]
-
-    return full_image
+# Enhanced edge compatibility scoring
+def calculate_edge_compatibility(piece1, piece2, direction):
+    """Calculate compatibility score between two pieces in given direction"""
+    if direction == 'up':
+        edge1 = piece1[0, :]
+        edge2 = piece2[-1, :]
+    elif direction == 'down':
+        edge1 = piece1[-1, :]
+        edge2 = piece2[0, :]
+    elif direction == 'left':
+        edge1 = piece1[:, 0]
+        edge2 = piece2[:, -1]
+    elif direction == 'right':
+        edge1 = piece1[:, -1]
+        edge2 = piece2[:, 0]
+    
+    # Base edge difference
+    base_diff = edge_difference(edge1, edge2)
+    
+    # Add corner matching bonus
+    corner_bonus = 0
+    if direction in ['up', 'down']:
+        # Check corner alignment for horizontal edges
+        corner_diff1 = abs(float(edge1[0]) - float(edge2[0]))
+        corner_diff2 = abs(float(edge1[-1]) - float(edge2[-1]))
+        corner_bonus = (corner_diff1 + corner_diff2) * 0.5
+    else:
+        # Check corner alignment for vertical edges
+        corner_diff1 = abs(float(edge1[0]) - float(edge2[0]))
+        corner_diff2 = abs(float(edge1[-1]) - float(edge2[-1]))
+        corner_bonus = (corner_diff1 + corner_diff2) * 0.5
+    
+    return base_diff + corner_bonus * 0.3
 
 
-# Initialize a 4x4 grid with zeros
-
-
-def get_score(array1, array2):
-    diffrance = 0
-    for i in range(len(array1)):
-        diffrance = diffrance + abs(array1[i] - array2[i])
-    return diffrance
-
-
-def get_value(value, paren_patch, patch, directions):
-    max_score = float("inf")
-    max_vale = -1
-    paren_patch = np.array(paren_patch)
-    for i in value:
-        score = 0
-        child_patch = np.array(patch[i])
-
-        if directions == (0, 1):
-            for j in range(128):
-                score += abs(paren_patch[j][127] - child_patch[j][0])
-        if directions == (0, -1):
-            for j in range(128):
-                score += abs(paren_patch[j][0] - child_patch[j][127])
-        if directions == (1, 0):
-            for j in range(128):
-                score += abs(paren_patch[127][j] - child_patch[0][j])
-        if directions == (-1, 0):
-            for j in range(128):
-                score += abs(paren_patch[0][j] - child_patch[127][j])
-
-        if score < max_score:
-            max_score = score
-            max_vale = i
-
-    return max_vale
-
-
-def bfs_fill(grid, patch, value):
-    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-    queue = deque([(0, 0)])
-    visited = set()
-    visited.add((0, 0))
-
-    while queue:
-        x, y = queue.popleft()
-
-        for dx, dy in directions:
-            nx, ny = x + dx, y + dy
-            if 0 <= nx < 4 and 0 <= ny < 4 and (nx, ny) not in visited:
-                queue.append((nx, ny))
-                visited.add((nx, ny))
-                current_val = get_value(value, patch[grid[x][y]], patch, (dx, dy))
-                grid[nx][ny] = current_val
-                value.remove(current_val)
-
-
-def image(image):
-    plt.imshow(image, cmap="gray")
-    plt.title("512x512 Matrix Visualization")
-    plt.colorbar()  # Optional: shows a color bar indicating intensity levels
-    plt.show()
-
-
-def get_neighbors(i, j, grid):
-    neighbors = []
+# Calculate the value (total edge differences) of the current arrangement
+def get_value(grid, pieces):
+    total_difference = 0
     rows, cols = len(grid), len(grid[0])
-
-    # Check Up
-    if i - 1 >= 0:
-        neighbors.append((i - 1, j))
-
-    # Check Down
-    if i + 1 < rows:
-        neighbors.append((i + 1, j))
-
-    # Check Left
-    if j - 1 >= 0:
-        neighbors.append((i, j - 1))
-
-    # Check Right
-    if j + 1 < cols:
-        neighbors.append((i, j + 1))
-
-    return neighbors
+    for i in range(rows):
+        for j in range(cols):
+            piece_index = grid[i][j]
+            if piece_index is not None:
+                piece = pieces[piece_index]
+                if i > 0 and grid[i-1][j] is not None:
+                    total_difference += calculate_edge_compatibility(piece, pieces[grid[i-1][j]], 'up')
+                if i < rows-1 and grid[i+1][j] is not None:
+                    total_difference += calculate_edge_compatibility(piece, pieces[grid[i+1][j]], 'down')
+                if j > 0 and grid[i][j-1] is not None:
+                    total_difference += calculate_edge_compatibility(piece, pieces[grid[i][j-1]], 'left')
+                if j < cols-1 and grid[i][j+1] is not None:
+                    total_difference += calculate_edge_compatibility(piece, pieces[grid[i][j+1]], 'right')
+    return total_difference
 
 
-def value_function(grid, patches):
-    score = 0
-    for i in range(len(grid)):
-        for j in range(len(grid[0])):
-            neighbors = get_neighbors(i, j, grid)
-
-            for k in neighbors:
-                if k[1] == j + 1:
-                    img1 = patches[grid[k[0]][k[1]]]
-                    img2 = patches[grid[i][j]]
-
-                    for m in range(128):
-                        score += abs(img2[127][m] - img1[0][m])
-
-                if k[1] == j - 1:
-                    img1 = patches[grid[k[0]][k[1]]]
-                    img2 = patches[grid[i][j]]
-
-                    for m in range(128):
-                        score += abs(img1[127][m] - img2[0][m])
-
-                if k[0] == i + 1:
-                    img1 = patches[grid[k[0]][k[1]]]
-                    img2 = patches[grid[i][j]]
-
-                    for m in range(128):
-                        score += abs(img2[m][127] - img1[m][0])
-
-                if k[0] == i - 1:
-                    img1 = patches[grid[k[0]][k[1]]]
-                    img2 = patches[grid[i][j]]
-
-                    for m in range(128):
-                        score += abs(img1[m][127] - img2[m][0])
-
-    return np.sqrt(score)
-
-
-def calculate_gradients(image, threshold=100):
-    """
-    Calculate the edge gradients in x and y directions using Sobel filters.
-
-    :param image: Input image.
-    :return: Gradients in x and y directions and their sum.
-    """
-    # Convert to grayscale
-    gray = image
-    # Calculate the gradient in the x direction
-    grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-
-    # Calculate the gradient in the y direction
-    grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-    magnitude = np.sqrt(grad_x**2 + grad_y**2)
-
-    # Apply the threshold filter: Set gradients below the threshold to 0
-    grad_x[magnitude < threshold] = 0
-    grad_y[magnitude < threshold] = 0
-    # Sum the absolute gradients for all pixels
-    grad_sum = np.sqrt(np.sum(np.abs(grad_x)) + np.sum(np.abs(grad_y)))
-
-    return grad_sum
-
-
-def simulated_annealing(grid, patches, value):
-    current_grid = copy.deepcopy(grid)
-    best_grid = copy.deepcopy(grid)
-    current_score = value_function(current_grid, patches)
-    best_score = current_score
-
-    initial_temp = 1000
-    final_temp = 1
-    alpha = 0.995  # Cooling rate
-    temp = initial_temp
-    iterations = 0
-    while temp > final_temp:
-        iterations += 1
-        # Select two random cells in the grid to swap
-        x1, y1 = random.randint(0, 3), random.randint(0, 3)
-        x2, y2 = random.randint(0, 3), random.randint(0, 3)
-
-        # Swap the values in the grid
-        current_grid[x1][y1], current_grid[x2][y2] = (
-            current_grid[x2][y2],
-            current_grid[x1][y1],
-        )
-
-        new_score = value_function(current_grid, patches)
-
-        # Decide whether to accept the new solution
-        if new_score < current_score or random.uniform(0, 1) < math.exp(
-            (current_score - new_score) / temp
-        ):
-            current_score = new_score
-            if current_score < best_score:
-                best_score = current_score
-                best_grid = copy.deepcopy(current_grid)
+# Generate a neighbor by swapping two pieces with improved strategy
+def generate_neighbor(grid):
+    new_grid = copy.deepcopy(grid)
+    rows, cols = len(grid), len(grid[0])
+    
+    # 80% of the time do local swaps (adjacent or nearby pieces)
+    # 20% of the time do random swaps
+    if random.random() < 0.8:
+        # Local swap: choose a piece and swap with a nearby piece
+        i1, j1 = random.randint(0, rows-1), random.randint(0, cols-1)
+        
+        # Find nearby positions
+        nearby_positions = []
+        for di in [-1, 0, 1]:
+            for dj in [-1, 0, 1]:
+                ni, nj = i1 + di, j1 + dj
+                if 0 <= ni < rows and 0 <= nj < cols and (di != 0 or dj != 0):
+                    nearby_positions.append((ni, nj))
+        
+        if nearby_positions:
+            i2, j2 = random.choice(nearby_positions)
         else:
-            # Revert the swap if not accepted
-            current_grid[x1][y1], current_grid[x2][y2] = (
-                current_grid[x2][y2],
-                current_grid[x1][y1],
-            )
-
-        # Cool down
-        temp *= alpha
-
-    return best_grid, best_score, iterations
+            i2, j2 = random.randint(0, rows-1), random.randint(0, cols-1)
+    else:
+        # Random swap
+        i1, j1 = random.randint(0, rows-1), random.randint(0, cols-1)
+        i2, j2 = random.randint(0, rows-1), random.randint(0, cols-1)
+    
+    new_grid[i1][j1], new_grid[i2][j2] = new_grid[i2][j2], new_grid[i1][j1]
+    return new_grid
 
 
-if __name__ == "__main__":
-    images = load_octave_column_matrix("jigsaww.mat")
-    print(images.shape)  # Should print (512, 512)
+def greedy_initial_placement(pieces):
+    """Create a better initial arrangement using greedy edge matching"""
+    rows, cols = 4, 4
+    grid = [[-1 for _ in range(cols)] for _ in range(rows)]
+    used_pieces = set()
+    
+    # Start with a random corner piece
+    corner_piece = random.randint(0, len(pieces) - 1)
+    grid[0][0] = corner_piece
+    used_pieces.add(corner_piece)
+    
+    # Fill the grid row by row using best edge matches
+    for i in range(rows):
+        for j in range(cols):
+            if grid[i][j] != -1:  # Already filled
+                continue
+                
+            best_piece = -1
+            best_score = float('inf')
+            
+            # Try each unused piece
+            for piece_idx in range(len(pieces)):
+                if piece_idx in used_pieces:
+                    continue
+                    
+                total_score = 0
+                valid_neighbors = 0
+                
+                # Check compatibility with placed neighbors
+                if i > 0 and grid[i-1][j] != -1:  # Top neighbor
+                    score = calculate_edge_compatibility(pieces[piece_idx], pieces[grid[i-1][j]], 'up')
+                    total_score += score
+                    valid_neighbors += 1
+                    
+                if j > 0 and grid[i][j-1] != -1:  # Left neighbor
+                    score = calculate_edge_compatibility(pieces[piece_idx], pieces[grid[i][j-1]], 'left')
+                    total_score += score
+                    valid_neighbors += 1
+                
+                # Average score for valid neighbors (or 0 if no neighbors)
+                if valid_neighbors > 0:
+                    avg_score = total_score / valid_neighbors
+                else:
+                    avg_score = 0  # For pieces with no placed neighbors yet
+                
+                if avg_score < best_score:
+                    best_score = avg_score
+                    best_piece = piece_idx
+            
+            if best_piece != -1:
+                grid[i][j] = best_piece
+                used_pieces.add(best_piece)
+    
+    return grid
 
-    images = images.T
 
-    patch, state_mat = create_patch(images)
-    final_grid = None
-    final_score = float("inf")
-    start_time = time.time()
-    iterations = 0
-    for i in range(16):
-        grid = [[-1 for _ in range(4)] for _ in range(4)]
-        grid[0][0] = i
-        value = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-        value.remove(i)
-        bfs_fill(grid, patch, value)
-        new_grid = copy.deepcopy(grid)
-        new_img = reconstruct_image(patch, new_grid)
-        score = calculate_gradients(new_img)
-        final_grid_1, new_score, iter = simulated_annealing(new_grid, patch, score)
-        if score < final_score:
-            iterations = iter
-            final_grid = grid
-            final_score = score
+# Enhanced simulated annealing algorithm with better parameters
+def simulated_annealing(pieces, initial_grid, max_iterations=20000, initial_temp=2000, cooling_rate=0.9995):
+    current_grid = copy.deepcopy(initial_grid)
+    current_value = get_value(current_grid, pieces)
+    best_grid = copy.deepcopy(current_grid)
+    best_value = current_value
+    temperature = initial_temp
+    
+    improvements = 0
+    last_improvement = 0
 
-        best_img = reconstruct_image(patch, final_grid)
-        new_score = calculate_gradients(best_img)
-        if new_score < final_score:
-            final_grid = final_grid_1
-            final_score = new_score
-        process = psutil.Process()
-    total_time = time.time() - start_time
-    memory_usage = process.memory_info().rss / (1024 * 1024)
-    print(f"Number of iteration required {iterations}")
-    print(f"Time required: {total_time:.2f} seconds")
-    print(f"Memory usage: {memory_usage:.2f} MB")
-    best_img = reconstruct_image(patch, final_grid)
-    image(best_img)
+    for iteration in tqdm(range(max_iterations), desc="Solving jigsaw"):
+        neighbor_grid = generate_neighbor(current_grid)
+        neighbor_value = get_value(neighbor_grid, pieces)
+        delta = neighbor_value - current_value
+
+        # Accept better solutions or probabilistically accept worse ones
+        acceptance_prob = math.exp(-delta / max(temperature, 1e-10)) if delta > 0 else 1.0
+        
+        if delta < 0 or random.uniform(0, 1) < acceptance_prob:
+            current_grid = neighbor_grid
+            current_value = neighbor_value
+
+            if current_value < best_value:
+                best_grid = copy.deepcopy(current_grid)
+                best_value = current_value
+                improvements += 1
+                last_improvement = iteration
+
+        temperature *= cooling_rate
+        
+        # Early stopping if no improvement for a long time
+        if iteration - last_improvement > max_iterations // 4:
+            print(f"\nEarly stopping at iteration {iteration} (no improvement for {iteration - last_improvement} iterations)")
+            break
+
+    print(f"\nOptimization completed with {improvements} improvements. Final score: {best_value:.2f}")
+    return best_grid, best_value
+
+
+def multiple_runs_optimization(pieces, num_runs=3):
+    """Run multiple optimization attempts with different initial configurations"""
+    best_overall_grid = None
+    best_overall_value = float('inf')
+    
+    print(f"Running {num_runs} optimization attempts...")
+    
+    for run in range(num_runs):
+        print(f"\n--- Run {run + 1}/{num_runs} ---")
+        
+        # Create different initial configurations
+        if run == 0:
+            print("Using greedy initial placement...")
+            initial_grid = greedy_initial_placement(pieces)
+        elif run == 1:
+            # Sequential arrangement
+            print("Using sequential initial placement...")
+            initial_grid = [[i*4 + j for j in range(4)] for i in range(4)]
+        else:
+            # Random arrangement
+            print("Using random initial placement...")
+            pieces_indices = list(range(16))
+            random.shuffle(pieces_indices)
+            initial_grid = []
+            idx = 0
+            for i in range(4):
+                row = []
+                for j in range(4):
+                    row.append(pieces_indices[idx])
+                    idx += 1
+                initial_grid.append(row)
+        
+        initial_score = get_value(initial_grid, pieces)
+        print(f"Initial score: {initial_score:.2f}")
+        
+        grid, value = simulated_annealing(pieces, initial_grid)
+        improvement = initial_score - value
+        print(f"Improvement: {improvement:.2f} ({(improvement/initial_score)*100:.1f}%)")
+        
+        if value < best_overall_value:
+            best_overall_grid = copy.deepcopy(grid)
+            best_overall_value = value
+            print(f"New best result found in run {run + 1}!")
+    
+    print(f"\nBest overall score: {best_overall_value:.2f}")
+    return best_overall_grid, best_overall_value
+
+
+def reconstruct_image(pieces, grid):
+    piece_height, piece_width = pieces[0].shape
+    rows, cols = len(grid), len(grid[0])
+    reconstructed = np.zeros((rows * piece_height, cols * piece_width))
+
+    for i in range(rows):
+        for j in range(cols):
+            piece_index = grid[i][j]
+            reconstructed[i*piece_height:(i+1)*piece_height, j*piece_width:(j+1)*piece_width] = pieces[piece_index]
+
+    return reconstructed
+
+
+# Load the pieces from the file
+print("Loading jigsaw puzzle...")
+pieces = []
+matrix = load_octave_column_matrix("jigsaw.mat")
+
+# For a 512x512 image, we'll create a 4x4 grid of 128x128 pieces
+piece_size = 128
+num_pieces_per_side = 4
+rows, cols = 4, 4
+
+for i in range(num_pieces_per_side):
+    for j in range(num_pieces_per_side):
+        piece = matrix[i*piece_size:(i+1)*piece_size, j*piece_size:(j+1)*piece_size]
+        pieces.append(piece)
+
+print(f"Created {len(pieces)} puzzle pieces of size {piece_size}x{piece_size}")
+
+# Set random seed for reproducibility
+random.seed(42)
+np.random.seed(42)
+
+# Use the enhanced optimization
+start_time = time.time()
+final_grid, final_value = multiple_runs_optimization(pieces, num_runs=3)
+total_time = time.time() - start_time
+
+print(f"\nOptimization completed in {total_time:.2f} seconds")
+
+# Compare with original arrangement
+original_grid = [[i*cols + j for j in range(cols)] for i in range(rows)]
+original_image = reconstruct_image(pieces, original_grid)
+result_image = reconstruct_image(pieces, final_grid)
+
+# Calculate improvement metrics
+original_score = get_value(original_grid, pieces)
+improvement = original_score - final_value
+improvement_percentage = (improvement / original_score) * 100
+
+print(f"\nResults:")
+print(f"Original score: {original_score:.2f}")
+print(f"Final score: {final_value:.2f}")
+print(f"Improvement: {improvement:.2f} ({improvement_percentage:.1f}%)")
+
+# Enhanced visualization
+plt.figure(figsize=(15, 7))
+
+plt.subplot(1, 3, 1)
+plt.title(f"Original Scrambled\n(Score: {original_score:.1f})", fontsize=12)
+plt.imshow(original_image, cmap='gray')
+plt.axis('off')
+
+plt.subplot(1, 3, 2)
+plt.title(f"Reconstructed\n(Score: {final_value:.1f})", fontsize=12)
+plt.imshow(result_image, cmap='gray')
+plt.axis('off')
+
+plt.subplot(1, 3, 3)
+# Show the difference
+difference = np.abs(original_image.astype(float) - result_image.astype(float))
+plt.title(f"Difference\n(Improvement: {improvement_percentage:.1f}%)", fontsize=12)
+plt.imshow(difference, cmap='hot')
+plt.colorbar(shrink=0.8)
+plt.axis('off')
+
+plt.tight_layout()
+plt.show()
+
+print(f"\nPuzzle solving complete! Check the visualization window for results.")
