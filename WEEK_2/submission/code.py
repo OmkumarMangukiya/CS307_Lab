@@ -16,7 +16,7 @@ class AStarPlagiarismDetector:
             nltk.download('punkt_tab')
             print("Download complete.")
 
-    def _preprocess(self, text):
+    def preprocess(self, text):
         sentences = nltk.sent_tokenize(text)
         normalized_sentences = []
         for sentence in sentences:
@@ -25,9 +25,9 @@ class AStarPlagiarismDetector:
             normalized_sentences.append(s.strip())
         return [s for s in normalized_sentences if s]
 
-    def _levenshtein_distance(self, s1, s2):
+    def edit_distance(self, s1, s2):
         if len(s1) < len(s2):
-            return self._levenshtein_distance(s2, s1)
+            return self.edit_distance(s2, s1)
 
         if len(s2) == 0:
             return len(s1)
@@ -44,7 +44,35 @@ class AStarPlagiarismDetector:
 
         return previous_row[-1]
 
-    def _a_star_align(self, doc1_sents, doc2_sents):
+    def get_successors(self, state, doc1_sents, doc2_sents):
+        """Get possible successor states for A* search"""
+        i, j = state
+        successors = []
+        
+        # Alignment move
+        if i < len(doc1_sents) and j < len(doc2_sents):
+            cost = self.edit_distance(doc1_sents[i], doc2_sents[j])
+            successors.append(((i + 1, j + 1), 'align', i, j, cost))
+        
+        # Skip document 1 sentence
+        if i < len(doc1_sents):
+            cost = len(doc1_sents[i])
+            successors.append(((i + 1, j), 'skip_doc1', i, -1, cost))
+        
+        # Skip document 2 sentence  
+        if j < len(doc2_sents):
+            cost = len(doc2_sents[j])
+            successors.append(((i, j + 1), 'skip_doc2', -1, j, cost))
+        
+        return successors
+
+    def distance_heuristic(self, state, goal_state):
+        """Calculate heuristic distance to goal state"""
+        i, j = state
+        goal_i, goal_j = goal_state
+        return abs(goal_i - i) + abs(goal_j - j)
+
+    def a_star_align(self, doc1_sents, doc2_sents):
         start_state = (0, 0)
         goal_state = (len(doc1_sents), len(doc2_sents))
 
@@ -67,7 +95,7 @@ class AStarPlagiarismDetector:
             i, j = current_state
 
             if i < len(doc1_sents) and j < len(doc2_sents):
-                cost = self._levenshtein_distance(doc1_sents[i], doc2_sents[j])
+                cost = self.edit_distance(doc1_sents[i], doc2_sents[j])
                 new_g = g_cost + cost
                 h = 0
                 new_f = new_g + h
@@ -92,7 +120,7 @@ class AStarPlagiarismDetector:
 
         return [], float('inf')
 
-    def _report_results(self, path, doc1_sents, doc2_sents, total_cost):
+    def report_results(self, path, doc1_sents, doc2_sents, total_cost):
         print("\n--- Plagiarism Detection Report ---")
         print(f"Optimal Alignment Cost (Total Edit Distance): {total_cost}")
         plagiarised_count = 0
@@ -130,8 +158,8 @@ class AStarPlagiarismDetector:
         print(f"Document 1: \"{doc1_text}\"")
         print(f"Document 2: \"{doc2_text}\"\n")
         
-        doc1_sents = self._preprocess(doc1_text)
-        doc2_sents = self._preprocess(doc2_text)
+        doc1_sents = self.preprocess(doc1_text)
+        doc2_sents = self.preprocess(doc2_text)
         
         print(f"Doc 1 sentences: {len(doc1_sents)}, Doc 2 sentences: {len(doc2_sents)}")
 
@@ -139,9 +167,9 @@ class AStarPlagiarismDetector:
             print("One or both documents are empty after preprocessing. Cannot compare.")
             return
 
-        alignment_path, total_cost = self._a_star_align(doc1_sents, doc2_sents)
+        alignment_path, total_cost = self.a_star_align(doc1_sents, doc2_sents)
         
-        self._report_results(alignment_path, doc1_sents, doc2_sents, total_cost)
+        self.report_results(alignment_path, doc1_sents, doc2_sents, total_cost)
 
 
 if __name__ == '__main__':
