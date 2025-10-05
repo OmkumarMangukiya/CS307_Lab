@@ -146,26 +146,29 @@ def vgn(clause, k, m, n, max_restarts=3, use_h1=True):
             print(f"Solution is{node.state}")
             print(f"Node reached after gen_1")
             return True
-        print("GEEn 2")
+
+        print("Running gen_2 ")
         node = hill_climb(clause, node, gen_2, k, m, n, use_h1=use_h1)
         if check(clause, node):
             print("Solution found")
             print(f"Solution is{node.state}")
             print(f"Node reached after gen_2")
             return True
-        print("GEEn 3")
+
+        print("Running gen_3 ")
         node = hill_climb(clause, node, gen_3, k, m, n, use_h1=use_h1)
         if check(clause, node):
             print("Solution found")
             print(f"Solution is{node.state}")
             print(f"Node reached after gen_3")
             return True
+
         current_value = heuristic_value_1(clause, node) if use_h1 else heuristic_value_2(clause, node)
         if current_value > best_value:
             best_value = current_value
             best_node = node
-    return check(clause, best_node)
 
+    return check(clause, best_node)
 
 
 vns_results = {}
