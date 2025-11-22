@@ -1,162 +1,206 @@
 import numpy as np
-from scipy.special import factorial
-import matplotlib.pyplot as plt
-import seaborn as sns
-import sys
+from functools import lru_cache
+from scipy.stats import poisson
 
-class poisson_class:
-    def __init__(self, rental_rate,return_rate,max_value = 20):
-        self.apha = rental_rate
-        self.beta = return_rate
-        self.max_value = max_value+1
-
-        rental_prob= self.poisson_probability(self.apha)
-        self.rental_prob = rental_prob/rental_prob.sum()
-        return_prob= self.poisson_probability(self.beta)
-        self.return_prob = return_prob/return_prob.sum()
-        
-    def get_rental(self, num):
-        return self.rental_prob[num]
-    
-    def get_return(self, num):
-        return self.return_prob[num]
-
-    def poisson_probability(self,lambda_value):
-
-        k = np.arange(0,self.max_value)
-
-        return (lambda_value**k * np.exp(-lambda_value)) / factorial(k)
+MAX_BIKES = 20
+MAX_MOVE = 5
+DISCOUNT = 0.9
+# limit Poisson enumeration for speed; last bucket absorbs remaining mass
+POISSON_CAP = 11
+POISSON_RANGE = POISSON_CAP + 1
 
 
-def make_action(state,action):
-    max_value = 20
-    return [max(0, min(state[0] + action,max_value)), max(0, min(state[1] - action,max_value))]
+def truncated_poisson_probs(lam):
+    probs = np.array([poisson.pmf(k, lam) for k in range(POISSON_RANGE)])
+    probs[-1] += 1.0 - probs.sum()
+    return probs
 
 
-loc_a = poisson_class(3,4)
-loc_b = poisson_class(3,2)
+PR_RENT_1 = truncated_poisson_probs(3)
+PR_RENT_2 = truncated_poisson_probs(4)
+PR_RET_1 = truncated_poisson_probs(3)
+PR_RET_2 = truncated_poisson_probs(2)
 
-value = np.zeros((20+1, 20+1))
-policy = value.copy().astype(int)
 
-gam = 0.9
+def valid_action_bounds(state):
+    s1, s2 = state
+    min_action = max(-MAX_MOVE, s1 - MAX_BIKES, -s2)
+    max_action = min(MAX_MOVE, s1, MAX_BIKES - s2)
+    return range(int(min_action), int(max_action) + 1)
 
-def expected_return(state,action):
-    global value
-    r = 0
 
-    new_state = make_action(state,action)
-    
-    if action <= 0:
-        r = r + -2*abs(action)
-    else:
-        r = r + -2*abs(action-1)
-    
-    if new_state[0] > 10:
-        r = r + (-10)
-    if  new_state[1] > 10:
-        r = r + (-10)
+@lru_cache(maxsize=None)
+def transition_bundle(s1, s2, action):
+    bikes1 = min(MAX_BIKES, max(0, s1 - action))
+    bikes2 = min(MAX_BIKES, max(0, s2 + action))
 
-    for rent_a in range(0,21):
-        for rent_b in range(0,21):
-            for return_a in range(0,21):
-                for return_b in range(0,21):
-                    prob = loc_a.get_rental(rent_a) * loc_b.get_rental(rent_b) * loc_a.get_return(return_a) * loc_b.get_return(return_b)
+    outcomes = {}
+    for rent1, p_rent1 in enumerate(PR_RENT_1):
+        for rent2, p_rent2 in enumerate(PR_RENT_2):
+            rented1 = min(bikes1, rent1)
+            rented2 = min(bikes2, rent2)
+            remaining1 = bikes1 - rented1
+            remaining2 = bikes2 - rented2
 
-                    valid_requests_A = min(new_state[0], rent_a)
-                    valid_requests_B = min(new_state[1], rent_b)
+            for ret1, p_ret1 in enumerate(PR_RET_1):
+                for ret2, p_ret2 in enumerate(PR_RET_2):
+                    prob = p_rent1 * p_rent2 * p_ret1 * p_ret2
+                    if prob == 0:
+                        continue
 
-                    reward = (valid_requests_A + valid_requests_B)*(10)
+                    bikes_after1 = min(MAX_BIKES, remaining1 + ret1)
+                    bikes_after2 = min(MAX_BIKES, remaining2 + ret2)
+                    next_state = (bikes_after1, bikes_after2)
+                    reward = 10 * (rented1 + rented2)
 
-                    new_s = [0,0]
-                    new_s[0] = max(min(new_state[0] - valid_requests_A + return_a, 20),0)
-                    new_s[1] = max(min(new_state[1] - valid_requests_B + return_b, 20),0)
+                    if next_state not in outcomes:
+                        outcomes[next_state] = [0.0, 0.0]
+                    outcomes[next_state][0] += prob
+                    outcomes[next_state][1] += prob * reward
 
-                    r = r + prob*(reward + gam*value[new_s[0]][new_s[1]])
+    packed = tuple((ns, prob, reward_sum) for ns, (prob, reward_sum) in outcomes.items())
+    return (bikes1, bikes2), packed
 
-    return r
 
-error = 50
-def policy_evaluation():
-    global value
-    global error
-    error_1 = error/10
+def expected_return(state, action, values, transfer_cost_fn, parking_penalty_fn):
+    (pre_b1, pre_b2), transitions = transition_bundle(state[0], state[1], action)
+    total = -transfer_cost_fn(action) - parking_penalty_fn(pre_b1, pre_b2)
 
-    error = error/10
+    for next_state, prob, reward_sum in transitions:
+        total += reward_sum + DISCOUNT * prob * values[next_state]
+    return total
+
+
+def policy_evaluation(policy, values, transfer_cost_fn, parking_penalty_fn, theta=1e-3):
     while True:
-        
-        delta = 0 
-        for i in range(value.shape[0]):
-            for j in range(value.shape[1]):
+        delta = 0.0
+        old_values = values.copy()
+        new_values = old_values.copy()
 
-                old_val = value[i][j]
-            
-                value[i][j] = expected_return([i,j],policy[i][j])
-                
-                delta = max(delta ,abs(old_val - value[i][j]))
-                print('.', end = '')
-                sys.stdout.flush()
+        for s1 in range(MAX_BIKES + 1):
+            for s2 in range(MAX_BIKES + 1):
+                action = policy[s1, s2]
+                new_val = expected_return((s1, s2), action, old_values, transfer_cost_fn, parking_penalty_fn)
+                new_values[s1, s2] = new_val
+                delta = max(delta, abs(new_val - old_values[s1, s2]))
 
-        print(delta)
-        sys.stdout.flush()
-        if delta < error_1:
+        values[:, :] = new_values
+        if delta < theta:
             break
-                
 
-def policy_improvement():
-    
-    global policy
-    
+
+def policy_improvement(policy, values, transfer_cost_fn, parking_penalty_fn):
     policy_stable = True
-    for i in range(value.shape[0]):
-        for j in range(value.shape[1]):
-            old_action = policy[i][j]
-            
-            max_act_val = None
-            max_act = None
-            
-            t12 = min(i,5)      
-            t21 = -min(j,5)                
-            for act in range(t21,t12+1):
-                σ = expected_return([i,j], act)
-                if max_act_val == None:
-                    max_act_val = σ
-                    max_act = act
-                elif max_act_val < σ:
-                    max_act_val = σ
-                    max_act = act
-                
-            policy[i][j] = max_act
-            
-            if old_action!= policy[i][j]:
+    for s1 in range(MAX_BIKES + 1):
+        for s2 in range(MAX_BIKES + 1):
+            old_action = policy[s1, s2]
+            best_value = float("-inf")
+            best_action = old_action
+
+            for action in valid_action_bounds((s1, s2)):
+                val = expected_return((s1, s2), action, values, transfer_cost_fn, parking_penalty_fn)
+                if val > best_value:
+                    best_value = val
+                    best_action = action
+
+            policy[s1, s2] = best_action
+            if best_action != old_action:
                 policy_stable = False
-    
+
     return policy_stable
 
-save_policy_counter = 0
-save_value_counter = 0
-def save_policy():
-    
-    global save_policy_counter
-    save_policy_counter += 1
-    ax = sns.heatmap(policy, linewidth=0.5)
-    ax.invert_yaxis()
-    plt.savefig('policy'+str(save_policy_counter)+'.svg')
-    plt.close()
-    
-def save_value():
-    global save_value_counter
-    save_value_counter += 1
-    ax = sns.heatmap(value, linewidth=0.5)
-    ax.invert_yaxis()
-    plt.savefig('value'+ str(save_value_counter)+'.svg')
-    plt.close()
+
+def policy_iteration(transfer_cost_fn, parking_penalty_fn):
+    values = np.zeros((MAX_BIKES + 1, MAX_BIKES + 1))
+    policy = np.zeros_like(values, dtype=int)
+    iteration = 0
+
+    while True:
+        iteration += 1
+        print(f"Policy iteration pass {iteration}...")
+        policy_evaluation(policy, values, transfer_cost_fn, parking_penalty_fn)
+        if policy_improvement(policy, values, transfer_cost_fn, parking_penalty_fn):
+            break
+
+    return policy, values
+
+
+def base_transfer_cost(action):
+    return 2 * abs(action)
+
+
+def modified_transfer_cost(action):
+    if action > 0:
+        return 2 * max(0, action - 1)
+    return 2 * abs(action)
+
+
+def no_parking_penalty(pre_b1, pre_b2):
+    return 0
+
+
+def parking_penalty(pre_b1, pre_b2):
+    penalty = 0
+    if pre_b1 > 10:
+        penalty += 4
+    if pre_b2 > 10:
+        penalty += 4
+    return penalty
+
+
+def print_policy(policy, title):
+    print(f"\n{title}")
+    for s1 in range(0, MAX_BIKES + 1, 5):
+        row = []
+        for s2 in range(0, MAX_BIKES + 1, 5):
+            row.append(f"{policy[s1, s2]:>2}")
+        print(f"s1={s1:02}: {' '.join(row)}")
+
+def print_values(values, title):
+    print(f"\n{title}")
+    print("Sample value function (every 5 states):")
+    for s1 in range(0, MAX_BIKES + 1, 5):
+        row = []
+        for s2 in range(0, MAX_BIKES + 1, 5):
+            row.append(f"{values[s1, s2]:7.2f}")
+        print(f"s1={s1:02}: {' '.join(row)}")
+
+def print_full_policy(policy, title):
+    print(f"\n{title} - Full Policy Table")
+    print("s1\\s2", end="")
+    for s2 in range(MAX_BIKES + 1):
+        if s2 % 5 == 0:
+            print(f"{s2:>4}", end="")
+    print()
+    for s1 in range(MAX_BIKES + 1):
+        if s1 % 5 == 0:
+            print(f"{s1:3}", end="")
+            for s2 in range(MAX_BIKES + 1):
+                if s2 % 5 == 0:
+                    print(f"{policy[s1, s2]:>4}", end="")
+            print()
 
 if __name__ == "__main__":
-    while(1):
-        policy_evaluation()
-        ρ = policy_improvement()
-        save_value()
-        save_policy()
-        if ρ == True:
-            break
+    print("="*60)
+    print("PART 2: Baseline Policy Iteration")
+    print("="*60)
+    base_policy, base_values = policy_iteration(base_transfer_cost, no_parking_penalty)
+    print_policy(base_policy, "Optimal policy (baseline Jack's/Gbike)")
+    print_values(base_values, "Value function (baseline)")
+
+    print("\n" + "="*60)
+    print("PART 3: Modified Policy Iteration (Free Transfer + Parking Penalty)")
+    print("="*60)
+    modified_policy, modified_values = policy_iteration(modified_transfer_cost, parking_penalty)
+    print_policy(modified_policy, "Optimal policy (free shuttle + parking fee)")
+    print_values(modified_values, "Value function (modified)")
+    
+    print("\n" + "="*60)
+    print("COMPARISON: Key State Differences")
+    print("="*60)
+    print("State (s1, s2) | Baseline Action | Modified Action | Baseline Value | Modified Value")
+    print("-" * 80)
+    for s1 in [0, 5, 10, 15, 20]:
+        for s2 in [0, 5, 10, 15, 20]:
+            if base_policy[s1, s2] != modified_policy[s1, s2]:
+                print(f"({s1:2}, {s2:2})        | {base_policy[s1, s2]:>13} | {modified_policy[s1, s2]:>14} | {base_values[s1, s2]:>13.2f} | {modified_values[s1, s2]:>14.2f}")

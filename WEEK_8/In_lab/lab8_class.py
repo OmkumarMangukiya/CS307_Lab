@@ -7,15 +7,17 @@ WIN_STATE = (0, 3)
 LOSE_STATE = (1, 3)
 START = (2, 0)
 DETERMINISTIC = True
+DEFAULT_LIVING_REWARD = -0.04
 
 class State:
-    def __init__(self, state=START,win = WIN_STATE,lose = LOSE_STATE):
+    def __init__(self, state=START,win = WIN_STATE,lose = LOSE_STATE, living_reward=DEFAULT_LIVING_REWARD):
         self.board = np.zeros([BOARD_ROWS, BOARD_COLS])
         self.state = state
         self.isEnd = False
         self.determine = DETERMINISTIC
         self.win = WIN_STATE
         self.lose = LOSE_STATE
+        self.living_reward = living_reward
 
     def giveReward(self,state):
         if state == WIN_STATE:
@@ -23,7 +25,7 @@ class State:
         elif state == LOSE_STATE:
             return -1
         else:
-            return -0.04
+            return self.living_reward
 
     def isEndFunc(self):
         if (self.state == WIN_STATE) or (self.state == LOSE_STATE):
@@ -75,12 +77,13 @@ class State:
 
 class Agent:
 
-    def __init__(self):
+    def __init__(self, living_reward=DEFAULT_LIVING_REWARD):
         self.states = []
         self.actions = ["up", "down", "left", "right"]
-        self.State = State()
+        self.State = State(living_reward=living_reward)
         self.gam = 0.9
         self.exp_rate = 0.3
+        self.living_reward = living_reward
 
         # initial state reward
         self.state_values = {}
@@ -92,7 +95,7 @@ class Agent:
         self.state_values[LOSE_STATE] = -1
     def reset(self):
         self.states = []
-        self.State = State()
+        self.State = State(living_reward=self.living_reward)
 
 
     def get_rightangle(self,action):
@@ -142,9 +145,14 @@ class Agent:
                 out += str(self.state_values[(i, j)]).ljust(4) + ' | '
             print(out)
         print('----------------------------------')
-if __name__ == "__main__":
-    s = State()
-    s.showBoard()
-    ag = Agent()
+def run_experiment(living_reward):
+    print(f"\n=== Running value iteration with living reward r(s) = {living_reward} ===")
+    ag = Agent(living_reward=living_reward)
     ag.play()
     ag.showValues()
+
+
+if __name__ == "__main__":
+    rewards_to_test = [-2, 0.1, 0.02, 1]
+    for reward in rewards_to_test:
+        run_experiment(reward)
